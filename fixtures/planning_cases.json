@@ -1,0 +1,46 @@
+{
+  "budget": 100,
+  "proposals": [
+    {
+      "id": "flex-expand",
+      "cost": 70,
+      "changes": [
+        {
+          "table": "rooms",
+          "id": "flex",
+          "field": "seats",
+          "value": 35
+        }
+      ]
+    },
+    {
+      "id": "village-expand",
+      "cost": 80,
+      "changes": [
+        {
+          "table": "rooms",
+          "id": "village-room",
+          "field": "seats",
+          "value": 35
+        }
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "reference",
+      "changes": []
+    },
+    {
+      "id": "village-growth",
+      "changes": [
+        {
+          "table": "demands",
+          "id": "village-primary",
+          "field": "students",
+          "value": 40
+        }
+      ]
+    }
+  ]
+}
