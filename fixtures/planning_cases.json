@@ -1,28 +1,39 @@
 {
-  "budget": 100,
+  "budget": 160,
   "proposals": [
     {
-      "id": "flex-expand",
+      "id": "expand-shared",
       "cost": 70,
       "changes": [
-        {
-          "table": "rooms",
-          "id": "flex",
-          "field": "seats",
-          "value": 35
-        }
+        {"table": "buildings", "id": "shared", "field": "seat_limit", "value": 75},
+        {"table": "rooms", "id": "flex", "field": "seats", "value": 35},
+        {"table": "rooms", "id": "flex", "field": "area", "value": 100}
       ]
     },
     {
-      "id": "village-expand",
+      "id": "expand-village",
       "cost": 80,
       "changes": [
-        {
-          "table": "rooms",
-          "id": "village-room",
-          "field": "seats",
-          "value": 35
-        }
+        {"table": "stages", "id": "primary", "field": "class_limit", "value": 35},
+        {"table": "buildings", "id": "rural-school", "field": "seat_limit", "value": 40},
+        {"table": "rooms", "id": "village-room", "field": "seats", "value": 35},
+        {"table": "rooms", "id": "village-room", "field": "area", "value": 80}
+      ]
+    },
+    {
+      "id": "town-secondary-lab",
+      "cost": 30,
+      "requires": ["expand-shared"],
+      "changes": [
+        {"table": "stages", "id": "secondary", "field": "class_limit", "value": 30}
+      ]
+    },
+    {
+      "id": "close-rural",
+      "cost": 10,
+      "excludes": ["expand-village"],
+      "changes": [
+        {"table": "buildings", "id": "rural-school", "field": "seat_limit", "value": 0}
       ]
     }
   ],
@@ -34,11 +45,19 @@
     {
       "id": "village-growth",
       "changes": [
+        {"table": "demands", "id": "village-primary", "field": "students", "value": 45}
+      ]
+    },
+    {
+      "id": "rural-closure",
+      "changes": [
         {
-          "table": "demands",
-          "id": "village-primary",
-          "field": "students",
-          "value": 40
+          "table": "buildings",
+          "id": "rural-school",
+          "field": "closures",
+          "value": [
+            {"start": "2026-09-01", "end": "2027-01-01", "reason": "temporary-closure"}
+          ]
         }
       ]
     }

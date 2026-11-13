@@ -151,7 +151,11 @@ def allocation_signature(result):
     return tuple((a['demand'], a['room'], a['students']) for a in result['assignments'])
 
 
-def solve_period(catalog, edges, period, node_limit=100000):
+class _SearchStop(Exception):
+    pass
+
+
+def search_period(catalog, edges, period, node_limit):
     options = choices_for_period(catalog, edges, period)
     options.sort(key=lambda item: (-len(item[1]), item[0]))
     required = catalog.document['policy'].get('require_minima', True)
@@ -160,12 +164,16 @@ def solve_period(catalog, edges, period, node_limit=100000):
     visited = 0
     pruned = 0
     infeasible = None
+    root_upper = optimistic_bound(catalog, edges, period, {}, {room for room, _ in options})
+    stopped = False
 
     def visit(index, chosen):
         nonlocal best, best_key, visited, pruned, infeasible
+        # Checking before incrementing keeps ``visited`` equal to the node count
+        # and stops as soon as the cap would be exceeded.
+        if visited + 1 > node_limit:
+            raise _SearchStop()
         visited += 1
-        if visited > node_limit:
-            raise SearchLimit(f'period {period}: exact search exceeded {node_limit} nodes; no partial result committed')
         remaining = {room for room, _ in options[index:]}
         upper = optimistic_bound(catalog, edges, period, chosen, remaining)
         if best is not None and upper < best['served']:
@@ -189,11 +197,103 @@ def solve_period(catalog, edges, period, node_limit=100000):
             best = candidate
             best_key = key
 
-    visit(0, {})
+    try:
+        visit(0, {})
+    except _SearchStop:
+        stopped = True
     if best is None:
+        if stopped:
+            return {
+                'status': 'incomplete',
+                'result': None,
+                'served_lower': 0,
+                'served_upper': max(root_upper, 0),
+                'shortfalls': None,
+                'search': {
+                    'visited': visited,
+                    'pruned': pruned,
+                    'exact': False,
+                    'node_limit': node_limit,
+                    'served_upper_bound': max(root_upper, 0),
+                    'bound_basis': 'eligible_room_capacity_and_demand',
+                    'candidate_found': False,
+                },
+            }
         raise InfeasibleMinimum(infeasible[1] if infeasible else {})
-    best['search'] = {'visited': visited, 'pruned': pruned, 'exact': True}
-    return best
+    if stopped:
+        upper = max(root_upper, best['served'])
+        search = {
+            'visited': visited,
+            'pruned': pruned,
+            'exact': False,
+            'node_limit': node_limit,
+            'served_upper_bound': upper,
+            'bound_basis': 'eligible_room_capacity_and_demand',
+            'candidate_found': True,
+        }
+        best['search'] = search
+        return {'status': 'incomplete', 'result': best, 'served_lower': best['served'], 'served_upper': upper, 'shortfalls': None, 'search': search}
+    search = {'visited': visited, 'pruned': pruned, 'exact': True, 'node_limit': node_limit}
+    best['search'] = search
+    return {'status': 'complete', 'result': best, 'served_lower': best['served'], 'served_upper': best['served'], 'shortfalls': None, 'search': search}
+
+
+def solve_period(catalog, edges, period, node_limit=100000):
+    outcome = search_period(catalog, edges, period, node_limit)
+    if outcome['status'] == 'incomplete':
+        raise SearchLimit(f'period {period}: exact search exceeded {node_limit} nodes; no partial result committed')
+    return outcome['result']
+
+
+def _combine(input_digest, period_results):
+    assignments = [a for p in period_results for a in p['assignments']]
+    return {
+        'version': 1,
+        'input_digest': input_digest,
+        'served': sum(p['served'] for p in period_results),
+        'cost': sum(p['cost'] for p in period_results),
+        'assignments': assignments,
+        'periods': period_results,
+    }
+
+
+def assess(catalog, node_limit=100000):
+    """Solve a catalog without discarding a candidate when the node cap is hit.
+
+    Returns ``status`` ``complete`` or ``incomplete`` and raises
+    ``InfeasibleMinimum`` only when a completed search proved every legal
+    stage choice short of a mandatory minimum.  An incomplete outcome carries
+    the best candidate (if any) together with a proven upper bound on service;
+    it never claims an optimum.
+    """
+    if isinstance(node_limit, bool) or not isinstance(node_limit, int) or node_limit < 1:
+        raise ValueError('node_limit must be positive integer')
+    assert_independent_periods(catalog)
+    edges = compatible_edges(catalog)
+    outcomes = [search_period(catalog, edges, period, node_limit) for period in sorted(catalog.periods)]
+    infeasible = [o for o in outcomes if o['status'] == 'infeasible']
+    if infeasible:
+        raise InfeasibleMinimum(infeasible[0]['shortfalls'])
+    incomplete = [o for o in outcomes if o['status'] == 'incomplete']
+    if incomplete:
+        results = [o['result'] for o in outcomes]
+        combined = _combine(catalog.fingerprint, results) if all(r is not None for r in results) else None
+        return {
+            'status': 'incomplete',
+            'result': combined,
+            'served_lower': sum(o['served_lower'] for o in outcomes),
+            'served_upper': sum(o['served_upper'] for o in outcomes),
+            'cost': combined['cost'] if combined else None,
+            'search': {period: o['search'] for period, o in zip(sorted(catalog.periods), outcomes)},
+        }
+    return {
+        'status': 'complete',
+        'result': _combine(catalog.fingerprint, [o['result'] for o in outcomes]),
+        'served_lower': sum(o['served_lower'] for o in outcomes),
+        'served_upper': sum(o['served_upper'] for o in outcomes),
+        'cost': sum(o['result']['cost'] for o in outcomes),
+        'search': {period: {'visited': o['search']['visited'], 'pruned': o['search']['pruned'], 'exact': o['search']['exact'], 'node_limit': node_limit} for period, o in zip(sorted(catalog.periods), outcomes)},
+    }
 
 
 def solve(catalog, node_limit=100000):
@@ -204,12 +304,4 @@ def solve(catalog, node_limit=100000):
     periods = []
     for period in sorted(catalog.periods):
         periods.append(solve_period(catalog, edges, period, node_limit))
-    assignments = [a for p in periods for a in p['assignments']]
-    return {
-        'version': 1,
-        'input_digest': catalog.fingerprint,
-        'served': sum(p['served'] for p in periods),
-        'cost': sum(p['cost'] for p in periods),
-        'assignments': assignments,
-        'periods': periods,
-    }
+    return _combine(catalog.fingerprint, periods)

@@ -19,6 +19,15 @@ from assessments.travel import travel_distribution, zone_flows, threshold_curve
 from assessments.interventions import select_interventions, replay_intervention
 from allocation.certificate import certificate, replay_certificate
 from assessments.decision import review_packet, prioritize_shortfalls
+from assessments.robust import (
+    robust_decision,
+    matrix_rows,
+    compute_and_save,
+    save_decision,
+    verify_decision_bundle,
+    load_decision,
+    export_decision,
+)
 from runs.store import Store
 from runs.worker import run_scenario, drain
 from runs.variants import apply_changes, scale_demands, scenario_lineage
@@ -157,6 +166,21 @@ def parser():
     command.add_argument('--fixture', required=True)
     command.add_argument('--proposals', required=True)
     command.add_argument('--budget', type=int, required=True)
+    command = sub.add_parser('robust')
+    command.add_argument('--fixture', required=True)
+    command.add_argument('--cases', required=True)
+    command.add_argument('--budget', type=int)
+    command.add_argument('--max-cases', type=int, default=10000)
+    command.add_argument('--save')
+    command = sub.add_parser('robust-matrix')
+    command.add_argument('--bundle', required=True)
+    command.add_argument('--recompute', action='store_true')
+    command = sub.add_parser('robust-verify')
+    command.add_argument('--bundle', required=True)
+    command.add_argument('--no-recompute', action='store_true')
+    command = sub.add_parser('robust-export')
+    command.add_argument('--bundle', required=True)
+    command.add_argument('destination')
     command = sub.add_parser('travel-curve')
     command.add_argument('--fixture', required=True)
     command.add_argument('--thresholds', required=True)
@@ -184,6 +208,35 @@ def dispatch(args):
         return verify_bundle(args.directory)
     if command == 'restore':
         return restore(args.source, args.destination, args.checksum)
+    if command == 'robust-verify':
+        return verify_decision_bundle(args.bundle, recompute=not args.no_recompute)
+    if command == 'robust-matrix':
+        outcome = load_decision(args.bundle, recompute=args.recompute)
+        return {
+            'summary': outcome['summary'],
+            'benchmarks': outcome['decision']['benchmarks'],
+            'matrix': matrix_rows(outcome['decision']),
+            'decision': outcome['decision']['decision'],
+        }
+    if command == 'robust-export':
+        return export_decision(args.bundle, args.destination)
+    if command == 'robust':
+        document = load_json(args.fixture)
+        cases = load_json(args.cases)
+        if args.save:
+            decision = robust_decision(
+                document, cases, budget=args.budget,
+                max_cases=args.max_cases, node_limit=args.node_limit,
+            )
+            saved = compute_and_save(
+                document, cases, args.save, budget=args.budget,
+                max_cases=args.max_cases, node_limit=args.node_limit,
+            )
+            return {'decision': decision, 'bundle': saved}
+        return robust_decision(
+            document, cases, budget=args.budget,
+            max_cases=args.max_cases, node_limit=args.node_limit,
+        )
     if hasattr(args, 'fixture') and args.fixture:
         document = load_json(args.fixture)
         catalog = parse(document)

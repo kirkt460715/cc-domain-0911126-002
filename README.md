@@ -6,6 +6,19 @@ estate 校验楼房、教室、学段、通勤和使用日历；allocation 进�
 
 共享楼宇容量会同时约束多个教室，教室不能同时分配给不兼容的学段。最低保障和精确搜索限额在结果中单独呈现。投资方案现有分析面向一个确定输入。
 
+跨情景最小后悔决策通过 `assessments.robust` 与 `estate_cli.py robust` 使用。规划文件给出预算、项目（成本、依赖与互斥）和情景（仅调整需求学生数或楼房停用，不含概率）。投资组合只选定一次；每个情景内用原有兼容、通勤、共享楼宇上限和最低保障规则重新分配学生，不按情景另选投资。
+
+排序依次为最大人数后悔最小、最坏情景服务人数最大、投资最小、全部情景分配成本之和最小、项目 ID 顺序。事后基准是同一预算下各情景的最优服务人数。无法满足最低保障的组合记为不可行，与数据冲突、搜索未完成分开报告。达到搜索上限时只给出候选和已证明的上下界，不标成最优。
+
+```sh
+python3 estate_cli.py robust --fixture fixtures/county.json --cases fixtures/planning_cases.json --save /tmp/decision
+python3 estate_cli.py robust-matrix --bundle /tmp/decision
+python3 estate_cli.py robust-verify --bundle /tmp/decision
+python3 estate_cli.py robust-export --bundle /tmp/decision /tmp/decision-export
+```
+
+`robust-matrix` 展开组合乘情景的证据矩阵并列出最坏情景与各情景事后基准；`robust-verify` 重新读取时核对基础目录、项目及情景摘要并重算决策；`robust-export` 导出矩阵、基准与已校验的实际分配。
+
 在项目根目录运行完整测试：
 
 ```sh
